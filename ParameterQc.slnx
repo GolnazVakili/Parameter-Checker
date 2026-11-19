@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/ParameterQc.Core/ParameterQc.Core.csproj" />
+    <Project Path="src/ParameterQc/ParameterQc.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ParameterQc.Core.Tests/ParameterQc.Core.Tests.csproj" />
+  </Folder>
+</Solution>

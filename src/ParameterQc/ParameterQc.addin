@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RevitAddIns>
+  <AddIn Type="Application">
+    <Name>Parameter QC</Name>
+    <Assembly>ParameterQc\ParameterQc.dll</Assembly>
+    <FullClassName>ParameterQc.App</FullClassName>
+    <ClientId>7c2e9a14-6b51-4e8d-9f30-1a4d8c6e2b90</ClientId>
+    <VendorId>EGIS</VendorId>
+    <VendorDescription>EGIS Group</VendorDescription>
+  </AddIn>
+</RevitAddIns>
