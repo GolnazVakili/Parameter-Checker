@@ -16,7 +16,7 @@ public partial class ResultWindow : Window
         InitializeComponent();
         _report = report;
         _viewName = viewName;
-        SubtitleText.Text = $"{viewName} · {elementCount} model elements · Elements with each parameter group complete";
+        SubtitleText.Text = $"{viewName} · {elementCount} model elements · Elements with each picked parameter complete";
         RulesText.Text = PopulationRules.Summary;
         ChartHost.Content = PopulationChart.Create(report);
         BuildLegend(report);

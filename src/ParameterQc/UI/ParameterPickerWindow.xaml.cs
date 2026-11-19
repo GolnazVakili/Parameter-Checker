@@ -1,18 +1,20 @@
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Media;
 
 namespace ParameterQc.UI;
 
 public partial class ParameterPickerWindow : Window
 {
-    private readonly List<GroupSection> _groups = [];
+    private const string Unassigned = "(not in a group)";
+
+    private readonly List<ParameterChoice> _choices = [];
+    private readonly List<TabSection> _tabs = [];
     private bool _updating;
 
     public ParameterPickerWindow(string viewName, int elementCount, IReadOnlyList<ParameterOption> parameters)
     {
         InitializeComponent();
-        ScopeText.Text = $"{viewName}. {elementCount} model elements. A group becomes one bar for each model category.";
+        ScopeText.Text = $"{viewName}. {elementCount} model elements. All lists every parameter. Put each one in a group, then Save as default.";
         Build(parameters);
         UpdateCount();
     }
@@ -21,166 +23,263 @@ public partial class ParameterPickerWindow : Window
 
     private void Build(IReadOnlyList<ParameterOption> parameters)
     {
-        foreach (IGrouping<string, ParameterOption> group in parameters.GroupBy(parameter => parameter.Group))
+        foreach (ParameterOption option in parameters.OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase))
         {
-            var section = new GroupSection(group.Key);
-            var header = new Grid { Margin = new Thickness(0, 8, 0, 4) };
-            header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
-            header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(8) });
-            header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            if (_choices.Any(choice => choice.Name.Equals(option.Name, StringComparison.OrdinalIgnoreCase)))
+                continue;
 
-            var swatch = new Border
-            {
-                Width = 14,
-                Height = 14,
-                Background = ChartPalette.Brush(ParameterGroups.ColorHex(group.Key)),
-                VerticalAlignment = VerticalAlignment.Center,
-                CornerRadius = new CornerRadius(2)
-            };
-            Grid.SetColumn(swatch, 0);
-            header.Children.Add(swatch);
-
-            var toggle = new CheckBox
-            {
-                Content = group.Key,
-                FontWeight = FontWeights.SemiBold,
-                VerticalAlignment = VerticalAlignment.Center,
-                IsThreeState = true
-            };
-            toggle.Click += (_, _) =>
-            {
-                if (_updating)
-                    return;
-
-                bool select = section.Rows.Any(row => row.Box.Visibility == Visibility.Visible && !row.Choice.IsSelected);
-                SetGroup(section, select);
-            };
-            Grid.SetColumn(toggle, 2);
-            header.Children.Add(toggle);
-            section.Toggle = toggle;
-
-            var rows = new StackPanel { Margin = new Thickness(22, 0, 0, 4) };
-            foreach (ParameterOption option in group.OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase))
-            {
-                var choice = new ParameterChoice(option.Name, option.Group);
-                var box = new CheckBox
-                {
-                    Content = option.Name,
-                    Margin = new Thickness(0, 2, 0, 2),
-                    Tag = choice
-                };
-                box.Checked += (_, _) => OnRowChanged(section, choice, true);
-                box.Unchecked += (_, _) => OnRowChanged(section, choice, false);
-                rows.Children.Add(box);
-                section.Rows.Add(new ParameterRow(choice, box));
-            }
-
-            GroupsPanel.Children.Add(header);
-            GroupsPanel.Children.Add(rows);
-            section.Header = header;
-            section.RowsPanel = rows;
-            _groups.Add(section);
+            string group = ParameterGroups.IsAssignable(option.Group) ? option.Group : ParameterGroups.Other;
+            _choices.Add(new ParameterChoice(option.Name, group));
         }
+
+        AddTab("All", _choices);
+        foreach (string group in ParameterGroups.Assignable)
+            AddTab(group, _choices.Where(choice => choice.Group == group).ToList());
     }
 
-    private void OnRowChanged(GroupSection section, ParameterChoice choice, bool selected)
+    private void AddTab(string name, IReadOnlyList<ParameterChoice> choices)
+    {
+        var toggle = new CheckBox
+        {
+            Content = name,
+            FontWeight = FontWeights.SemiBold,
+            IsThreeState = true,
+            Margin = new Thickness(4, 4, 4, 8)
+        };
+        var rows = new StackPanel();
+        var section = new TabSection(name, toggle, rows);
+        toggle.Click += (_, _) =>
+        {
+            if (_updating)
+                return;
+
+            bool select = section.Rows.Any(row => row.Container.Visibility == Visibility.Visible && !row.Choice.IsSelected);
+            SetRows(section.Rows, select);
+        };
+
+        foreach (ParameterChoice choice in choices)
+            section.Rows.Add(AddRow(section, choice));
+
+        var panel = new StackPanel { Margin = new Thickness(8) };
+        panel.Children.Add(toggle);
+        panel.Children.Add(rows);
+
+        var tab = new TabItem
+        {
+            Header = HeaderText(name, section.Rows.Count),
+            Content = new ScrollViewer
+            {
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                Content = panel
+            }
+        };
+        section.Tab = tab;
+        ParameterTabs.Items.Add(tab);
+        _tabs.Add(section);
+        RefreshToggle(section);
+    }
+
+    private ParameterRow AddRow(TabSection section, ParameterChoice choice)
+    {
+        var box = new CheckBox
+        {
+            Content = choice.Name,
+            VerticalAlignment = VerticalAlignment.Center,
+            Tag = choice
+        };
+        box.IsChecked = choice.IsSelected;
+        box.Checked += (_, _) => SetChoice(choice, true);
+        box.Unchecked += (_, _) => SetChoice(choice, false);
+
+        var combo = new ComboBox
+        {
+            Width = 250,
+            Margin = new Thickness(12, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        combo.Items.Add(Unassigned);
+        foreach (string group in ParameterGroups.Assignable)
+            combo.Items.Add(group);
+
+        _updating = true;
+        combo.SelectedItem = ParameterGroups.IsAssignable(choice.Group) ? choice.Group : Unassigned;
+        _updating = false;
+        combo.SelectionChanged += (_, _) => OnGroupChanged(choice, combo);
+
+        var grid = new Grid { Margin = new Thickness(4, 2, 4, 2) };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(combo, 1);
+        grid.Children.Add(box);
+        grid.Children.Add(combo);
+        section.RowsPanel.Children.Add(grid);
+
+        var row = new ParameterRow(section, choice, box, combo, grid);
+        choice.Rows.Add(row);
+        return row;
+    }
+
+    private void OnGroupChanged(ParameterChoice choice, ComboBox source)
     {
         if (_updating)
             return;
 
-        choice.IsSelected = selected;
-        RefreshGroup(section);
-        UpdateCount();
+        string picked = source.SelectedItem as string ?? Unassigned;
+        string group = picked == Unassigned ? ParameterGroups.Other : picked;
+        if (choice.Group == group)
+            return;
+
+        choice.Group = group;
+        _updating = true;
+        foreach (ParameterRow row in choice.Rows)
+            row.GroupList.SelectedItem = ParameterGroups.IsAssignable(group) ? group : Unassigned;
+        _updating = false;
+
+        foreach (ParameterRow row in choice.Rows.Where(row => row.Section.Name != "All").ToList())
+        {
+            row.Section.RowsPanel.Children.Remove(row.Container);
+            row.Section.Rows.Remove(row);
+            choice.Rows.Remove(row);
+        }
+
+        if (ParameterGroups.IsAssignable(group))
+        {
+            TabSection section = _tabs.First(tab => tab.Name == group);
+            ParameterRow row = AddRow(section, choice);
+            int index = section.Rows.FindIndex(existing =>
+                string.Compare(existing.Choice.Name, choice.Name, StringComparison.OrdinalIgnoreCase) > 0);
+            if (index < 0)
+            {
+                section.Rows.Add(row);
+            }
+            else
+            {
+                section.RowsPanel.Children.Remove(row.Container);
+                section.RowsPanel.Children.Insert(index, row.Container);
+                section.Rows.Insert(index, row);
+            }
+        }
+
+        ApplySearch();
+        RefreshToggles();
     }
 
-    private void SetGroup(GroupSection section, bool selected)
+    private void SetChoice(ParameterChoice choice, bool selected)
     {
         if (_updating)
             return;
 
         _updating = true;
-        foreach (ParameterRow row in section.Rows.Where(row => row.Box.Visibility == Visibility.Visible))
-        {
-            row.Choice.IsSelected = selected;
+        choice.IsSelected = selected;
+        foreach (ParameterRow row in choice.Rows)
             row.Box.IsChecked = selected;
-        }
-
         _updating = false;
-        RefreshGroup(section);
+        RefreshToggles();
         UpdateCount();
     }
 
-    private void RefreshGroup(GroupSection section)
+    private void SetRows(IEnumerable<ParameterRow> rows, bool selected)
     {
-        ParameterRow[] visible = section.Rows.Where(row => row.Box.Visibility == Visibility.Visible).ToArray();
+        if (_updating)
+            return;
+
+        _updating = true;
+        foreach (ParameterChoice choice in rows
+            .Where(row => row.Container.Visibility == Visibility.Visible)
+            .Select(row => row.Choice)
+            .Distinct())
+        {
+            choice.IsSelected = selected;
+            foreach (ParameterRow row in choice.Rows)
+                row.Box.IsChecked = selected;
+        }
+
+        _updating = false;
+        RefreshToggles();
+        UpdateCount();
+    }
+
+    private void RefreshToggles()
+    {
+        foreach (TabSection section in _tabs)
+            RefreshToggle(section);
+    }
+
+    private void RefreshToggle(TabSection section)
+    {
+        ParameterRow[] visible = section.Rows.Where(row => row.Container.Visibility == Visibility.Visible).ToArray();
         bool all = visible.Length > 0 && visible.All(row => row.Choice.IsSelected);
         bool any = visible.Any(row => row.Choice.IsSelected);
 
         _updating = true;
         section.Toggle.IsChecked = all ? true : any ? null : false;
+        section.Tab.Header = HeaderText(section.Name, visible.Length);
         _updating = false;
     }
 
     private void UpdateCount()
     {
-        int count = _groups.Sum(group => group.Rows.Count(row => row.Choice.IsSelected));
+        int count = _choices.Count(choice => choice.IsSelected);
         SelectionCountText.Text = count == 1 ? "1 parameter selected" : $"{count} parameters selected";
         OkButton.IsEnabled = count > 0;
     }
 
-    private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
+    private void SearchBox_TextChanged(object sender, TextChangedEventArgs e) => ApplySearch();
+
+    private void ApplySearch()
     {
         string query = SearchBox.Text.Trim();
-        foreach (GroupSection section in _groups)
+        foreach (ParameterChoice choice in _choices)
         {
-            bool any = false;
-            foreach (ParameterRow row in section.Rows)
-            {
-                bool match = query.Length == 0
-                    || row.Choice.Name.Contains(query, StringComparison.OrdinalIgnoreCase);
-                row.Box.Visibility = match ? Visibility.Visible : Visibility.Collapsed;
-                any |= match;
-            }
-
-            section.Header.Visibility = any ? Visibility.Visible : Visibility.Collapsed;
-            section.RowsPanel.Visibility = any ? Visibility.Visible : Visibility.Collapsed;
-            RefreshGroup(section);
+            bool match = query.Length == 0
+                || choice.Name.Contains(query, StringComparison.OrdinalIgnoreCase);
+            foreach (ParameterRow row in choice.Rows)
+                row.Container.Visibility = match ? Visibility.Visible : Visibility.Collapsed;
         }
+
+        RefreshToggles();
     }
 
     private void SelectShown_Click(object sender, RoutedEventArgs e)
     {
-        foreach (GroupSection section in _groups.Where(group => group.Header.Visibility == Visibility.Visible))
-            SetGroup(section, true);
+        SetRows(_tabs.SelectMany(section => section.Rows), true);
     }
 
     private void Clear_Click(object sender, RoutedEventArgs e)
     {
         _updating = true;
-        foreach (GroupSection section in _groups)
+        foreach (ParameterChoice choice in _choices)
         {
-            foreach (ParameterRow row in section.Rows)
-            {
-                row.Choice.IsSelected = false;
+            choice.IsSelected = false;
+            foreach (ParameterRow row in choice.Rows)
                 row.Box.IsChecked = false;
-            }
-
-            section.Toggle.IsChecked = false;
         }
+
+        foreach (TabSection section in _tabs)
+            section.Toggle.IsChecked = false;
 
         _updating = false;
         UpdateCount();
     }
 
+    private void SaveDefault_Click(object sender, RoutedEventArgs e)
+    {
+        GroupDefaults.Save(_choices.Select(choice => new ParameterSelection(choice.Name, choice.Group)));
+        int assigned = _choices.Count(choice => ParameterGroups.IsAssignable(choice.Group));
+        SelectionCountText.Text = $"Saved {assigned} parameter assignments as the default.";
+    }
+
     private void Ok_Click(object sender, RoutedEventArgs e)
     {
-        Selection = _groups
-            .SelectMany(group => group.Rows)
-            .Where(row => row.Choice.IsSelected)
-            .Select(row => new ParameterSelection(row.Choice.Name, row.Choice.Group))
+        Selection = _choices
+            .Where(choice => choice.IsSelected)
+            .Select(choice => new ParameterSelection(choice.Name, choice.Group))
             .ToList();
         DialogResult = true;
     }
+
+    private static string HeaderText(string name, int count) => $"{name} ({count})";
 
     private sealed class ParameterChoice
     {
@@ -191,30 +290,42 @@ public partial class ParameterPickerWindow : Window
         }
 
         public string Name { get; }
-        public string Group { get; }
+        public string Group { get; set; }
         public bool IsSelected { get; set; }
+        public List<ParameterRow> Rows { get; } = [];
     }
 
     private sealed class ParameterRow
     {
-        public ParameterRow(ParameterChoice choice, CheckBox box)
+        public ParameterRow(TabSection section, ParameterChoice choice, CheckBox box, ComboBox groupList, FrameworkElement container)
         {
+            Section = section;
             Choice = choice;
             Box = box;
+            GroupList = groupList;
+            Container = container;
         }
 
+        public TabSection Section { get; }
         public ParameterChoice Choice { get; }
         public CheckBox Box { get; }
+        public ComboBox GroupList { get; }
+        public FrameworkElement Container { get; }
     }
 
-    private sealed class GroupSection
+    private sealed class TabSection
     {
-        public GroupSection(string name) => Name = name;
+        public TabSection(string name, CheckBox toggle, StackPanel rowsPanel)
+        {
+            Name = name;
+            Toggle = toggle;
+            RowsPanel = rowsPanel;
+        }
 
         public string Name { get; }
-        public CheckBox Toggle { get; set; } = null!;
-        public FrameworkElement Header { get; set; } = null!;
-        public StackPanel RowsPanel { get; set; } = null!;
+        public CheckBox Toggle { get; }
+        public StackPanel RowsPanel { get; }
+        public TabItem Tab { get; set; } = null!;
         public List<ParameterRow> Rows { get; } = [];
     }
 }

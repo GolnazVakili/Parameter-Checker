@@ -1,6 +1,6 @@
 namespace ParameterQc;
 
-public sealed record ParameterOption(string Name, string Group);
+public sealed record ParameterOption(string Name, string Group, string Section);
 
 public sealed record ParameterSelection(string Name, string Group);
 
@@ -83,13 +83,11 @@ public static class ReportBuilder
         IEnumerable<ElementRecord> elements,
         IReadOnlyList<ParameterSelection> parameters)
     {
-        string[] groups = ParameterGroups.DisplayOrder
-            .Where(group => parameters.Any(parameter => parameter.Group == group))
-            .ToArray();
+        string[] groups = SeriesKeys(parameters);
 
         var selectedByGroup = groups.ToDictionary(
             group => group,
-            group => parameters.Where(parameter => parameter.Group == group).Select(parameter => parameter.Name).ToArray());
+            group => parameters.Where(parameter => KeyFor(parameter) == group).Select(parameter => parameter.Name).ToArray());
 
         var buckets = new Dictionary<string, Dictionary<string, MutableTally>>(StringComparer.OrdinalIgnoreCase);
 
@@ -142,6 +140,34 @@ public static class ReportBuilder
             groups,
             categories,
             new CategoryRow("Total", Freeze(totalBuckets, groups)));
+    }
+
+    private static string KeyFor(ParameterSelection parameter)
+    {
+        if (!string.IsNullOrWhiteSpace(parameter.Group) && parameter.Group != ParameterGroups.Other)
+            return parameter.Group;
+
+        return parameter.Name;
+    }
+
+    private static string[] SeriesKeys(IReadOnlyList<ParameterSelection> parameters)
+    {
+        var keys = ParameterGroups.DisplayOrder
+            .Where(group => group != ParameterGroups.Other)
+            .Where(group => parameters.Any(parameter => parameter.Group == group))
+            .ToList();
+
+        foreach (string name in parameters
+            .Where(parameter => parameter.Group == ParameterGroups.Other)
+            .Select(parameter => parameter.Name)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase))
+        {
+            if (!keys.Contains(name, StringComparer.OrdinalIgnoreCase))
+                keys.Add(name);
+        }
+
+        return keys.ToArray();
     }
 
     private static Dictionary<string, GroupTally> Freeze(

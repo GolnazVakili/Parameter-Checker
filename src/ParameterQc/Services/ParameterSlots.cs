@@ -13,7 +13,8 @@ internal static class ParameterSlots
         if (definition is InternalDefinition internalDefinition && !internalDefinition.Visible)
         {
             bool shared = parameter.IsShared;
-            bool known = KnownParameters.GroupFor(definition.Name) != ParameterGroups.Other;
+            bool known = KnownParameters.GroupFor(definition.Name) != ParameterGroups.Other
+                || GroupDefaults.Load().ContainsKey(definition.Name);
             if (!shared && !known)
                 return false;
         }

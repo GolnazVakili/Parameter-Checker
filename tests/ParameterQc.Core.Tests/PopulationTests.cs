@@ -225,6 +225,31 @@ public class ReportBuilderTests
     }
 
     [Fact]
+    public void UnlistedParametersAreShownByName()
+    {
+        var selected = new ParameterSelection[]
+        {
+            new("IfcExportAs", ParameterGroups.Ifc),
+            new("Comments", ParameterGroups.Other)
+        };
+        var elements = new[]
+        {
+            new ElementRecord("Walls", false, new Dictionary<string, SlotKind>
+            {
+                ["IfcExportAs"] = SlotKind.Filled,
+                ["Comments"] = SlotKind.Empty
+            })
+        };
+
+        PopulationReport report = ReportBuilder.Build(elements, selected);
+
+        Assert.Equal([ParameterGroups.Ifc, "Comments"], report.Groups);
+        Assert.DoesNotContain(ParameterGroups.Other, report.Groups);
+        Assert.Equal("1/1", report.Categories.Single().ByGroup[ParameterGroups.Ifc].Fraction);
+        Assert.Equal("0/1", report.Categories.Single().ByGroup["Comments"].Fraction);
+    }
+
+    [Fact]
     public void TotalAddsTheCountsInsteadOfAveragingPercents()
     {
         var selected = new ParameterSelection[] { new("Mark", ParameterGroups.Ifc) };
@@ -243,6 +268,35 @@ public class ReportBuilderTests
         Assert.Equal("2/2", report.Categories[1].ByGroup[ParameterGroups.Ifc].Fraction);
         Assert.Equal("3/4", report.Total.ByGroup[ParameterGroups.Ifc].Fraction);
         Assert.Equal(75, report.Total.ByGroup[ParameterGroups.Ifc].FilledPercent);
+    }
+}
+
+public class GroupDefaultTests
+{
+    [Fact]
+    public void SavedAssignmentsComeBackAsTheDefault()
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"parameter-groups-{Guid.NewGuid():N}.json");
+        try
+        {
+            GroupDefaults.Save(path,
+            [
+                new ParameterSelection("IfcExportAs", ParameterGroups.Ifc),
+                new ParameterSelection("Length (m)", ParameterGroups.PactDimension),
+                new ParameterSelection("Comments", ParameterGroups.Other)
+            ]);
+
+            IReadOnlyDictionary<string, string> loaded = GroupDefaults.Load(path);
+
+            Assert.Equal(ParameterGroups.Ifc, loaded["IfcExportAs"]);
+            Assert.Equal(ParameterGroups.PactDimension, loaded["Length (m)"]);
+            Assert.False(loaded.ContainsKey("Comments"));
+        }
+        finally
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
     }
 }
 

@@ -23,7 +23,8 @@ internal static class ViewScanner
     public static ViewScan Scan(Document document, View view)
     {
         var ids = new List<ElementId>();
-        var names = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var names = new Dictionary<string, ParameterOption>(StringComparer.OrdinalIgnoreCase);
+        IReadOnlyDictionary<string, string> saved = GroupDefaults.Load();
 
         foreach (Element element in Collect(document, view))
         {
@@ -38,14 +39,17 @@ internal static class ViewScanner
 
                 string name = parameter.Definition.Name;
                 if (!names.ContainsKey(name))
-                    names[name] = KnownParameters.GroupFor(name);
+                {
+                    string group = saved.TryGetValue(name, out string? assigned)
+                        ? assigned
+                        : ParameterGroups.Other;
+                    names[name] = new ParameterOption(name, group, SectionFor(parameter));
+                }
             }
         }
 
-        IReadOnlyList<ParameterOption> options = names
-            .OrderBy(pair => GroupIndex(pair.Value))
-            .ThenBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
-            .Select(pair => new ParameterOption(pair.Key, pair.Value))
+        IReadOnlyList<ParameterOption> options = names.Values
+            .OrderBy(option => option.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
         return new ViewScan(view.Name, ids.Count, ids, options);
@@ -167,9 +171,20 @@ internal static class ViewScanner
             && element.Category.CategoryType == CategoryType.Model;
     }
 
-    private static int GroupIndex(string group)
+    private static string SectionFor(Parameter parameter)
     {
-        int index = Array.IndexOf(ParameterGroups.DisplayOrder, group);
-        return index < 0 ? int.MaxValue : index;
+        try
+        {
+            Definition? definition = parameter.Definition;
+            if (definition == null)
+                return "Other";
+
+            string label = LabelUtils.GetLabelForGroup(definition.GetGroupTypeId());
+            return string.IsNullOrWhiteSpace(label) ? "Other" : label;
+        }
+        catch
+        {
+            return "Other";
+        }
     }
 }
